@@ -23,7 +23,7 @@ ANGLE_MERGE_TOLERANCE_DEG = 3.0
 
 
 def detect_circle(
-    blurred_gray: np.ndarray, min_radius: int | None = None, max_radius: int | None = None
+    blurred_gray: np.ndarray, min_radius: int, max_radius: int
 ) -> Tuple[int, int, int]:
     """Detect the most likely node circle in the drawing.
 
@@ -31,10 +31,6 @@ def detect_circle(
     1. Filter circles within a radius range [min_radius, max_radius].
     2. Pick the remaining circle with the largest radius.
     """
-    if min_radius is None:
-        min_radius = MIN_RADIUS
-    if max_radius is None:
-        max_radius = MAX_RADIUS
     circles = cv2.HoughCircles(
         blurred_gray,
         cv2.HOUGH_GRADIENT,
@@ -231,56 +227,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def analyze_image_array(image: np.ndarray):
-    """Run the full pipeline on an image array.
-
-    Returns a dict with numeric results and the annotated image.
-    """
-    if image is None:
-        raise ValueError("image is None in analyze_image_array")
-
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
-    edges = cv2.Canny(blurred, 50, 150)
-
-    cx, cy, r = detect_circle(blurred)
-    connections = detect_connections(edges, (cx, cy), r, CONNECTION_TOLERANCE_RATIO)
-    segment_angles, angles, sector_angles = compute_angles(
-        (cx, cy), connections, ANGLE_MERGE_TOLERANCE_DEG
-    )
-    annotated = annotate_image(image, (cx, cy), r, segment_angles)
-
-    return {
-        "center": (int(cx), int(cy)),
-        "radius": int(r),
-        "angles": [float(a) for a in angles],
-        "sector_angles": [float(a) for a in sector_angles],
-        "annotated": annotated,
-    }
-
-
 def main() -> None:
     args = parse_args()
     image = cv2.imread(args.image_path, cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError(f"Could not read image: {args.image_path}")
 
-    global MIN_RADIUS
-    global MAX_RADIUS
-    global ANGLE_MERGE_TOLERANCE_DEG
-    global CONNECTION_TOLERANCE_RATIO
-    MIN_RADIUS = args.min_radius
-    MAX_RADIUS = args.max_radius
-    ANGLE_MERGE_TOLERANCE_DEG = args.angle_merge_tol
-    CONNECTION_TOLERANCE_RATIO = args.connection_tol_ratio
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
+    edges = cv2.Canny(blurred, 50, 150)
 
-    result = analyze_image_array(image)
-
-    cx, cy = result["center"]
-    r = result["radius"]
-    angles = result["angles"]
-    sector_angles = result["sector_angles"]
-    annotated = result["annotated"]
+    cx, cy, r = detect_circle(blurred, args.min_radius, args.max_radius)
+    connections = detect_connections(edges, (cx, cy), r, args.connection_tol_ratio)
+    segment_angles, angles, sector_angles = compute_angles(
+        (cx, cy), connections, args.angle_merge_tol
+    )
 
     print(f"Detected circle center: ({cx}, {cy}), radius: {r}")
     print("Connection angles (degrees):", [round(a, 2) for a in angles])
@@ -290,9 +251,10 @@ def main() -> None:
         "sum:",
         round(sum(sector_angles), 2),
     )
-    if not angles:
+    if not connections:
         print("Warning: no connections detected for this circle.")
 
+    annotated = annotate_image(image, (cx, cy), r, segment_angles)
     output_path = "annotated_output.png"
     cv2.imwrite(output_path, annotated)
     print(f"Annotated output saved to {output_path}")
