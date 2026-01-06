@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Auto Angles Finder</title>
+  <style>
+    body { font-family: sans-serif; margin: 1.5rem; }
+    #result { margin-top: 1.5rem; }
+    img { max-width: 100%; height: auto; border: 1px solid #ccc; }
+    pre { background: #f4f4f4; padding: 0.5rem; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>Auto Angles Finder</h1>
+  <p>Select an engineering plan image with a circular node and connections.</p>
+
+  <form id="upload-form">
+    <input type="file" id="file-input" name="file" accept="image/*" required>
+    <button type="submit">Measure angles</button>
+  </form>
+
+  <div id="status"></div>
+
+  <div id="result" style="display:none;">
+    <h2>Results</h2>
+    <pre id="json-output"></pre>
+    <h3>Annotated image</h3>
+    <img id="annotated-img" alt="Annotated result">
+  </div>
+
+  <script>
+    const form = document.getElementById("upload-form");
+    const fileInput = document.getElementById("file-input");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const jsonOutput = document.getElementById("json-output");
+    const annotatedImg = document.getElementById("annotated-img");
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!fileInput.files.length) {
+        return;
+      }
+      statusEl.textContent = "Processing...";
+      resultEl.style.display = "none";
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      try {
+        const response = await fetch("/measure", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          statusEl.textContent = "Error: " + (data.error || response.statusText);
+          return;
+        }
+
+        statusEl.textContent = "";
+        jsonOutput.textContent = JSON.stringify(
+          {
+            center: data.center,
+            radius: data.radius,
+            angles: data.angles,
+            sector_angles: data.sector_angles,
+            sector_sum: data.sector_angles.reduce((a, b) => a + b, 0)
+          },
+          null,
+          2
+        );
+        annotatedImg.src = data.annotated_image;
+        resultEl.style.display = "block";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Unexpected error: " + err;
+      }
+    });
+  </script>
+</body>
+</html>
