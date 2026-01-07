@@ -228,37 +228,101 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = parse_args()
-    image = cv2.imread(args.image_path, cv2.IMREAD_COLOR)
-    if image is None:
-        raise FileNotFoundError(f"Could not read image: {args.image_path}")
+    import traceback
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
-    edges = cv2.Canny(blurred, 50, 150)
+    print("DEBUG: main() started")
 
-    cx, cy, r = detect_circle(blurred, args.min_radius, args.max_radius)
-    connections = detect_connections(edges, (cx, cy), r, args.connection_tol_ratio)
-    segment_angles, angles, sector_angles = compute_angles(
-        (cx, cy), connections, args.angle_merge_tol
-    )
+    try:
+        # --- parse command-line args ---
+        args = parse_args()
 
-    print(f"Detected circle center: ({cx}, {cy}), radius: {r}")
-    print("Connection angles (degrees):", [round(a, 2) for a in angles])
-    print(
-        "Sector angles (degrees):",
-        [round(a, 2) for a in sector_angles],
-        "sum:",
-        round(sum(sector_angles), 2),
-    )
-    if not connections:
-        print("Warning: no connections detected for this circle.")
+        # --- read image ---
+        print(f"DEBUG: reading image {args.image_path}")
+        image = cv2.imread(args.image_path, cv2.IMREAD_COLOR)
 
-    annotated = annotate_image(image, (cx, cy), r, segment_angles)
-    output_path = "annotated_output.png"
-    cv2.imwrite(output_path, annotated)
-    print(f"Annotated output saved to {output_path}")
+        if image is None:
+            print(f"ERROR: Could not read image: {args.image_path}")
+            return
+
+        # --- run full analysis ---
+        print("DEBUG: running analyze_image_array()")
+        result = analyze_image_array(image)
+
+        cx, cy = result["center"]
+        r = result["radius"]
+        angles = result["angles"]
+        sector_angles = result["sector_angles"]
+        annotated = result["annotated"]
+
+        # --- print numeric results ---
+        print(f"Detected circle center: ({cx}, {cy}), radius: {r}")
+        print("Connection angles (degrees):", [round(a, 2) for a in angles])
+        print(
+            "Sector angles (degrees):",
+            [round(a, 2) for a in sector_angles],
+            "sum:",
+            round(sum(sector_angles), 2),
+        )
+
+        # --- save annotated image ---
+        output_path = "annotated_output.png"
+        cv2.imwrite(output_path, annotated)
+        print(f"Annotated output saved to {output_path}")
+
+    except Exception as e:
+        print("ERROR in main():", e)
+        traceback.print_exc()
 
 
+# make sure main() is actually called
 if __name__ == "__main__":
+    print("DEBUG: __main__ block executing")
     main()
+def analyze_image_array(image: np.ndarray) -> dict:
+    """Analyze the input image array and return detected angles and annotated image.
+
+    Returns a dictionary with keys:
+    - 'center': (cx, cy) tuple of circle center
+    - 'radius': radius of detected circle
+    - 'angles': list of detected connection angles in degrees
+    - 'sector_angles': list of angles between connections in degrees
+    - 'annotated': annotated image array
+    """
+    # Convert to grayscale and blur to reduce noise.
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+    # Detect the circle node.
+    cx, cy, r = detect_circle(blurred, MIN_RADIUS, MAX_RADIUS)
+
+    # Detect edges for line segment detection.
+    edges = cv2.Canny(blurred, 50, 150, apertureSize=3)
+
+    # Detect connection segments.
+    segments = detect_connections(
+        edges, center=(cx, cy), radius=r, tolerance_ratio=CONNECTION_TOLERANCE_RATIO
+    )
+
+    # Compute connection angles.
+    segment_angles, angles, sector_angles = compute_angles(
+        center=(cx, cy),
+        segments=segments,
+        angle_merge_tol=ANGLE_MERGE_TOLERANCE_DEG,
+    )
+
+    # Annotate the image with detected features.
+    annotated = annotate_image(
+        image,
+        center=(cx, cy),
+        radius=r,
+        segment_angles=segment_angles,
+    )
+
+    return {
+        "center": (cx, cy),
+        "radius": r,
+        "angles": angles,
+        "sector_angles": sector_angles,
+        "annotated": annotated,
+    }
+    
